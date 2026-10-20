@@ -1,0 +1,14 @@
+name: Ads Manager Pro - Keep Render Free awake
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Send request to Render Free health endpoint
+        run: |
+          curl --fail --silent --show-error --location --max-time 110 --retry 1 --retry-delay 5 \
+            'https://ads-manager-pro-android-v7.onrender.com/health'
