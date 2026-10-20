@@ -1,0 +1,46 @@
+name: Ads Manager Pro - deploy free background mode once
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ads-manager-free-deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-app-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout Ads Manager app branch
+        uses: actions/checkout@v4
+        with:
+          ref: ads-manager-pro-android-v7
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Unpack existing application source
+        run: |
+          mkdir -p unpack
+          base64 --decode ads-manager-v7-source.b64 > /tmp/ads-manager-old.zip
+          ( cd unpack && unzip -oq /tmp/ads-manager-old.zip )
+      - name: Apply audited Free-mode patch and test
+        run: |
+          cd unpack
+          node ../ads-manager-free-patch.mjs
+          node --check server.js
+          node --check app.js
+          node --test test/server-auto-pause.test.js test/server.test.js test/oauth-flow.test.js test/spend-alert-42000.test.js
+      - name: Repack and deploy via existing Render auto-deploy
+        run: |
+          cd unpack
+          zip -qr /tmp/ads-manager-updated.zip . -x '*.env'
+          cd ..
+          base64 -w0 /tmp/ads-manager-updated.zip > ads-manager-v7-source.b64
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ads-manager-v7-source.b64
+          git commit -m 'Deploy Ads Manager Pro v7.5 Free server background checks' || exit 0
+          git push origin HEAD:ads-manager-pro-android-v7
