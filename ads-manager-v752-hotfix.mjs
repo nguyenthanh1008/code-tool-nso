@@ -90,3 +90,61 @@ patch753(path.join(root,'index.html'),s=>{
  return s;
 });
 console.info('Ads Manager Pro v7.5.3: fixed Meta purchase omission and enabled safe run diagnostics');
+
+
+// v7.5.4: server-driven adaptive monitoring, best effort on Render Free.
+patch(autopause,s=>{
+ if(s.includes('AUTO_PAUSE_NEAR_LIMIT_MS'))return s;
+ s=s.replace('export const AUTO_PAUSE_INTERVAL_MS = 120_000;',
+  'export const AUTO_PAUSE_INTERVAL_MS = 120_000;\nexport const AUTO_PAUSE_NEAR_LIMIT_MS = 30_000;\nexport const AUTO_PAUSE_WAKE_TICK_MS = 15_000;\nexport const AUTO_PAUSE_NEAR_LIMIT_RATIO = 0.80;');
+ s=s.replace("    period:'today',timezone:TZ,intervalSeconds:120,",
+  "    period:'today',timezone:TZ,intervalSeconds:120,nearIntervalSeconds:30,\n    nearLimit:!!record?.nearLimit,\n    nextCheckAt:record?.enabled && record?.lastCheckedAt ? new Date(Date.parse(record.lastCheckedAt) + (record.nearLimit?AUTO_PAUSE_NEAR_LIMIT_MS:AUTO_PAUSE_INTERVAL_MS)).toISOString() : null,");
+ return s;
+});
+patch(backend,s=>{
+ if(s.includes('AUTO_PAUSE_NEAR_LIMIT_RATIO'))return s;
+ s=s.replace('import {AUTO_PAUSE_INTERVAL_MS, AutoPauseStore',
+  'import {AUTO_PAUSE_INTERVAL_MS, AUTO_PAUSE_NEAR_LIMIT_MS, AUTO_PAUSE_WAKE_TICK_MS, AUTO_PAUSE_NEAR_LIMIT_RATIO, AutoPauseStore');
+ s=s.replace(' const stats={accountsChecked:0,campaignsScanned:0,overLimit:0,candidates:0,paused:0,errors:0};',
+  ' const stats={accountsChecked:0,campaignsScanned:0,nearLimit:0,overLimit:0,candidates:0,paused:0,errors:0};\n rule.nearLimit=false;');
+ s=s.replace('   stats.campaignsScanned+=camp.items.length;\n   stats.overLimit',
+  '   stats.campaignsScanned+=camp.items.length;\n   if(!camp.truncated && !ins.truncated){\n    const near=chooseAutoPauseCandidates(account,camp.items,ins.items,Math.ceil(rule.spend*AUTO_PAUSE_NEAR_LIMIT_RATIO),false);\n    stats.nearLimit+=near.length;\n    if(near.length)rule.nearLimit=true;\n   }\n   stats.overLimit');
+ s=s.replace(' }finally{rule.lastStats=stats;console.info',
+  ' }finally{if(stats.errors)rule.nearLimit=false;rule.lastStats=stats;console.info');
+ s=s.replace('   if(!forceUser && rule.lastCheckedAt && Date.now()-Date.parse(rule.lastCheckedAt)<AUTO_PAUSE_INTERVAL_MS-5000)continue;',
+  '   const interval=rule.nearLimit?AUTO_PAUSE_NEAR_LIMIT_MS:AUTO_PAUSE_INTERVAL_MS;\n   if(!forceUser && rule.lastCheckedAt && Date.now()-Date.parse(rule.lastCheckedAt)<interval-2000)continue;');
+ s=s.replace('        lastError:null,recentActions:old.recentActions||[],lastCheckedAt:null});',
+  '        lastError:null,recentActions:old.recentActions||[],lastCheckedAt:null,nearLimit:false});');
+ s=s.replace("  setInterval(()=>autoPauseTick().catch(e=>console.error('Auto pause failed:',e.message)),AUTO_PAUSE_INTERVAL_MS).unref();",
+  "  setInterval(()=>autoPauseTick().catch(e=>console.error('Auto pause failed:',e.message)),AUTO_PAUSE_WAKE_TICK_MS).unref();");
+ return s;
+});
+patch(frontend,s=>{
+ if(s.includes('v7.5.4: refresh live rule status'))return s;
+ s=s.replace('async function loadServerAutoPause(){','async function loadServerAutoPause(preserveDraft=false){');
+ s=s.replace('  renderServerAutoPause(state);\n }catch(e){featureServerReady=false;featureServerError=e.message;renderServerAutoPause();}',
+  '  renderServerAutoPause(state,preserveDraft);\n }catch(e){featureServerReady=false;featureServerError=e.message;renderServerAutoPause(undefined,preserveDraft);}');
+ s=s.replace('function renderServerAutoPause(state){','function renderServerAutoPause(state,preserveDraft=false){');
+ s=s.replace(" $('featureAutoOffSpend').value=featureAutoOffConfig.spend;",
+  " if(!preserveDraft){\n $('featureAutoOffSpend').value=featureAutoOffConfig.spend;");
+ s=s.replace(" document.querySelectorAll('[data-autooff-day]').forEach(box=>box.checked=featureAutoOffConfig.days.includes(Number(box.dataset.autooffDay)));",
+  " document.querySelectorAll('[data-autooff-day]').forEach(box=>box.checked=featureAutoOffConfig.days.includes(Number(box.dataset.autooffDay)));\n }");
+ s=s.replace(" (state?.lastCheckedAt?' Lần kiểm tra cuối: '+new Date(state.lastCheckedAt).toLocaleString('vi-VN')+'.':'')+",
+  " (state?.lastCheckedAt?' Lần kiểm tra cuối: '+new Date(state.lastCheckedAt).toLocaleString('vi-VN')+'.':' Chưa có lượt kiểm tra nào được máy chủ xác nhận.')+\n       (state?.nextCheckAt?' Lượt tiếp theo dự kiến: '+new Date(state.nextCheckAt).toLocaleTimeString('vi-VN')+'.':'')+\n       (state?.nearLimit?' Có camp gần 80% ngưỡng: kiểm tra nhanh khoảng 30 giây/lần.':'')+");
+ s=s.replace("(state?.lastStats?' Lượt quét: '+state.lastStats.accountsChecked+' TKQC / '+state.lastStats.campaignsScanned+' camp; vượt ngưỡng '+state.lastStats.overLimit+",
+  "(state?.lastStats?' Lượt quét: '+state.lastStats.accountsChecked+' TKQC / '+state.lastStats.campaignsScanned+' camp; gần ngưỡng '+(state.lastStats.nearLimit||0)+', vượt ngưỡng '+state.lastStats.overLimit+");
+ s=s.replace(' renderServerAccounts();renderAutoOffLog(featureAutoOffLog);',
+  ' if(!preserveDraft)renderServerAccounts();renderAutoOffLog(featureAutoOffLog);');
+ s=s.replace('// The 24/7 auto-pause loop lives on the server, not inside the Android tab.',
+  "// v7.5.4: refresh live rule status, without overwriting unsaved form edits.\nsetInterval(()=>{if(selectedPage==='features' && !$('dashboard').hidden && !document.hidden)loadServerAutoPause(true).catch(()=>{})},15000);\n// The monitor lives on the server, not inside the Android tab. Render Free is best-effort.");
+ s=s.replace('kiểm tra khoảng 2 phút/lần khi máy chủ còn hoạt động?',
+  'kiểm tra khoảng 2 phút/lần, hoặc 30 giây khi gần ngưỡng, lúc máy chủ còn hoạt động?');
+ return s;
+});
+patch(html,s=>{
+ s=s.replace('Bộ kiểm tra chạy trên máy chủ mỗi 2 phút khi bạn đã bật',
+  'Máy chủ kiểm tra khoảng 2 phút/lần hoặc 30 giây khi camp gần 80% ngưỡng, sau khi bạn bật');
+ s=s.replaceAll('v7.5.3 · Hiển thị kết quả kiểm tra','v7.5.4 · Giám sát gần ngưỡng');
+ return s;
+});
+console.info('Ads Manager Pro v7.5.4: adaptive server monitor (2min/30s) and status refresh installed');
