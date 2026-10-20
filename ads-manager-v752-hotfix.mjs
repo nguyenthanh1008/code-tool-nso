@@ -92,6 +92,11 @@ patch753(path.join(root,'index.html'),s=>{
 console.info('Ads Manager Pro v7.5.3: fixed Meta purchase omission and enabled safe run diagnostics');
 
 
+const autopause=path.join(root,'auto-pause.js');
+const backend=path.join(root,'server.js');
+const frontend=path.join(root,'app.js');
+const html=path.join(root,'index.html');
+const patch=patch753;
 // v7.5.4: server-driven adaptive monitoring, best effort on Render Free.
 patch(autopause,s=>{
  if(s.includes('AUTO_PAUSE_NEAR_LIMIT_MS'))return s;
